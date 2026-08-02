@@ -1,0 +1,16 @@
+# build output
+build/
+build-static/
+dist/
+compile_commands.json
+
+# raw test files, scratch work and private notes (not for publication)
+sample/
+samples/
+temp/
+IDEA.md
+
+# editor / OS
+.idea/
+.cache/
+.DS_Store
