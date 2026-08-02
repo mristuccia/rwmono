@@ -1,0 +1,3 @@
+Version 1.0
+- Initial release
+- Implemented strategies: bin (G and luma), flat, quincunx (with optional derotation)

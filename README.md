@@ -70,6 +70,11 @@ The honest summary:
 - **Where the no-demosaic modes genuinely win** is fine saturated-color detail — textiles, distant signage, brick courses, halftones, screens, backlit foliage. There demosaicers hallucinate luminance from chroma at up to **1.7× the true amplitude and at frequencies the scene does not contain**, permanently baked into the B&W result. `bin g` and `quincunx` are immune by construction. See §7 of the paper.
 - **A true monochrome back of the same sensor area keeps a 1.5–2.0 stop advantage** at matched viewing scale that no CFA processing can recover. `bin g` gives up one stop to the green passband and a second to using half the photosites. That is physics, not software.
 
+Bottom line:
+**▎ bin G and quincunx reach a real monochrome sensor's resolution at their output size, and quincunx's lattice is arguably better oriented than a square grid of the same pixel count. They do not reach its (lower) noise: at matched output scale they sit ~2 stops behind, and they render through a green filter rather than panchromatically. A mono back's advantage is light collection, and that is bought at capture time.
+
+The only way to recover the light collection of a true monochrome sensor, if possible, is by taking four identical shots and averaging them together. Once this is achieved, bin G at 1/4 megapixels and quincunx at 1/2 megapixels can effectively replace a real monochrome sensor having their respective resolution, the original sensor size and a green filter covering the lens.**
+
 Recommendations: **`bin g`** as the safe default, **`quincunx --derotate`** when resolution matters, **`bin luma`** for scenes without high-frequency color, **`flat`** as an expert option for low-saturation scenes.
 
 ## Build

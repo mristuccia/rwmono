@@ -174,6 +174,11 @@ What survives that concession is specific, and worth stating precisely:
 
 Within those niches the recommendations stand: **`bin` G** as the default (bulletproof, monochrome-sensor per-pixel SNR, quarter-size files, chroma-immune), **`quincunx --derotate`** when resolution matters (~85 % of demosaiced H/V resolution, zero chromatic guessing), **`bin` luma** only for scenes without high-frequency color (§ 7), and **`flat`** as an expert option for low-saturation scenes. A true monochrome back of the same sensor area retains a 1.5–2.0 stop noise advantage at matched viewing scale that no CFA processing — rwmono's or a demosaicer's — can recover. That is physics, not software.
 
+Bottom line:
+**▎ bin G and quincunx reach a real monochrome sensor's resolution at their output size, and quincunx's lattice is arguably better oriented than a square grid of the same pixel count. They do not reach its (lower) noise: at matched output scale they sit ~2 stops behind, and they render through a green filter rather than panchromatically. A mono back's advantage is light collection, and that is bought at capture time.
+
+The only way to recover the light collection of a true monochrome sensor, if possible, is by taking four identical shots and averaging them together. Once this is achieved, bin G at 1/4 megapixels and quincunx at 1/2 megapixels can effectively replace a real monochrome sensor having their respective resolution, the original sensor size and a green filter covering the lens.**
+
 # 7. Addendum: chroma-induced luminance hallucination
 
 Section 5 measured demosaicing at its best — neutral content, where cross-channel correlation holds perfectly. This addendum constructs the opposite case and shows what each pipeline does with it.
