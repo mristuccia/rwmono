@@ -49,7 +49,7 @@ clang++ -std=c++17 -O2 "${ARCHS[@]}" -mmacosx-version-min=$MACOS_MIN \
     "$PREFIX/lib/libraw_r.a" -lz \
     -o "$ROOT/dist/rwmono"
 
-codesign --force -s - "$ROOT/dist/rwmono"
+codesign -f -o runtime --timestamp -s "Developer ID Application: Marco Ristuccia (L5VNDJ764D)" "$ROOT/dist/rwmono"
 
 echo "--- architectures:"
 lipo -info "$ROOT/dist/rwmono"

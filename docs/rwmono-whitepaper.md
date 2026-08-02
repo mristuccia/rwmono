@@ -7,7 +7,7 @@ date: "August 2026"
 
 # Abstract
 
-Bayer-sensor cameras convert to black & white by first demosaicing — interpolating three color values at every photosite — and then discarding the color. This estimates values that were never measured, and for monochrome output the estimation is unnecessary. **rwmono** is a command-line tool that converts Bayer raw files (developed against Hasselblad `.3FR`; any LibRaw-supported Bayer format works) directly into monochrome linear DNG files using three interpolation-free strategies: 2×2 super-pixel binning, full-resolution channel equalization, and quincunx re-indexing of the green lattice. This paper describes the science behind each strategy, the implementation (including a from-scratch lossless-JPEG DNG writer), and a quantitative comparison of resolution and noise against conventional demosaic-plus-BW conversion and against a simulated true monochrome sensor. The headline results: on neutral subjects demosaicing retains *more* detail than green-only methods (every CFA pixel is a valid luminance sample there), and the equalized-mosaic mode is exact; the quincunx mode delivers about 85 % of demosaiced horizontal/vertical resolution with zero invented pixels; binning matches a monochrome sensor's per-pixel SNR at half resolution; and a true monochrome sensor retains an unbeatable ~1-stop noise advantage that no CFA processing can recover.
+Bayer-sensor cameras convert to black & white by first demosaicing — interpolating three color values at every photosite — and then discarding the color. This estimates values that were never measured, and for monochrome output the estimation is unnecessary. **rwmono** is a command-line tool that converts Bayer raw files (developed against Hasselblad `.3FR`; any LibRaw-supported Bayer format works) directly into monochrome linear DNG files using three interpolation-free strategies: 2×2 super-pixel binning, full-resolution channel equalization, and quincunx re-indexing of the green lattice. This paper describes the science behind each strategy, the implementation (including a from-scratch lossless-JPEG DNG writer), and a quantitative comparison of resolution and noise against conventional demosaic-plus-BW conversion and against a simulated true monochrome sensor. The headline results: on neutral subjects demosaicing retains *more* detail than green-only methods (every CFA pixel is a valid luminance sample there), and the equalized-mosaic mode is exact; the quincunx mode delivers about 85 % of demosaiced horizontal/vertical resolution with zero invented pixels; binning matches a monochrome sensor's per-pixel SNR at half resolution; and a true monochrome sensor of the same area retains an unbeatable 1.5–2 stop noise advantage at matched output scale that no CFA processing can recover.
 
 # 1. Background and motivation
 
@@ -53,7 +53,7 @@ Two practical additions:
 
 ## 2.4 What none of these can do
 
-A green-only image is the scene *through a green filter*, not scene luminance, and a CFA sensor discards roughly half its photons compared to a filterless monochrome sensor. Section 5 quantifies both points.
+A green-only image is the scene *through a green filter*, not scene luminance. A CFA photosite also discards roughly half the photons a filterless one would collect (one stop), and the green-only modes discard half the photosites on top of that (a second stop). Section 5 quantifies both points.
 
 # 3. Implementation
 
@@ -103,7 +103,7 @@ All commands below were run against the reference capture used throughout this p
 
 **Resolution.** A synthetic zone plate (all spatial frequencies to beyond Nyquist, all orientations, analytically known ground truth) was rendered as a neutral scene with 2×2-supersampled pixel aperture, mosaicked with Hasselblad-like channel sensitivities (R = 1/2.63, B = 1/1.62 of G), and written as a Bayer DNG. Both pipelines consumed the same file: rwmono's three modes on one side; LibRaw's AHD and DHT demosaicers followed by Rec. 709 luma conversion on the other. A **simulated monochrome sensor** — every native photosite sampling scene luminance directly, no CFA — was added as reference. Because each method's output-grid-to-scene mapping is known exactly, the retained contrast at each frequency is measured as the least-squares gain of the output against the analytic reference per frequency band (a matched filter: blur lowers it, aliasing junk decorrelates to ~0), normalized at low frequency. The neutral scene is deliberately demosaicing's *best* case.
 
-**Noise.** Uniform patches at 2 %, 18 %, and 50 % of full scale were simulated with Poisson shot noise (50 000 e⁻ full well at G saturation) and 3 e⁻ RMS read noise at identical exposure, mosaicked with the same sensitivities, and pushed through every real pipeline. The monochrome sensor collects the summed pass-bands of the three CFA channels — 2.0× a green photosite's photons, consistent with the white-balance data and the folklore "about one stop." SNR (mean/std) is reported per output pixel at each method's native output scale, and again with every output box-resampled to the bin grid (matched display scale), which credits full-resolution outputs for their downsampling headroom.
+**Noise.** Uniform patches at 2 %, 18 %, and 50 % of full scale were simulated with Poisson shot noise (50 000 e⁻ full well at G saturation) and 3 e⁻ RMS read noise at identical exposure, mosaicked with the same sensitivities, and pushed through every real pipeline. The monochrome sensor collects the summed pass-bands of the three CFA channels — 2.0× a green photosite's photons, consistent with the white-balance data and the folklore "about one stop." That factor is *per photosite*; the system-level gap is larger, because the green-only modes additionally use only half the photosites (§ 5.3). SNR (mean/std) is reported per output pixel at each method's native output scale, and again with every output box-resampled to the bin grid (matched display scale), which credits full-resolution outputs for their downsampling headroom. Stops are quoted throughout in the photographic sense — one stop is twice the light, hence a factor $\sqrt{2}$ in SNR, so a measured SNR ratio $k$ corresponds to $2\log_2 k$ stops.
 
 ## 5.2 Resolution results
 
@@ -133,20 +133,21 @@ Key observations:
 
 ![SNR on a uniform 18 % gray patch under identical exposure. Left: per output pixel at native output scale. Right: all outputs resampled to the bin grid.](figures/noise_chart.png){width=6.5in}
 
-| Method | SNR @2 % | SNR @18 % | SNR @50 % | @18 % matched scale |
-|---|---|---|---|---|
-| mono sensor (simulated) | 44.6 | 133.7 | 223.5 | **268.1** |
-| bin luma (R+2G+B)/4 | 50.1 | 150.3 | 253.4 | 150.3 |
-| bin G (G1+G2)/2 | 44.4 | 133.2 | 223.9 | 133.2 |
-| quincunx derotated | 38.7 | 116.0 | 194.3 | 138.8 |
-| DHT demosaic + BW | 31.9 | 95.5 | 159.7 | 157.6 |
-| flat (equalized mosaic) | 25.1 | 75.6 | 126.4 | 150.3 |
+| Method | SNR @2 % | SNR @18 % | SNR @50 % | @18 % matched scale | Behind mono, matched |
+|---|---|---|---|---|---|
+| mono sensor (simulated) | 44.6 | 133.7 | 223.5 | **268.1** | — |
+| bin luma (R+2G+B)/4 | 50.1 | 150.3 | 253.4 | 150.3 | 1.67 stops |
+| bin G (G1+G2)/2 | 44.4 | 133.2 | 223.9 | 133.2 | 2.02 stops |
+| quincunx derotated | 38.7 | 116.0 | 194.3 | 138.8 | 1.90 stops |
+| DHT demosaic + BW | 31.9 | 95.5 | 159.7 | 157.6 | 1.53 stops |
+| flat (equalized mosaic) | 25.1 | 75.6 | 126.4 | 150.3 | 1.67 stops |
 
 Reading the table:
 
-- **Binning buys back the monochrome sensor's per-pixel SNR.** bin G matches the mono sensor per pixel (133 vs 134) — at half the resolution. bin luma exceeds it slightly by averaging all four photosites.
-- **At matched display scale the monochrome sensor wins by ~0.8–1.0 EV over everything** (268 vs 158 for the best CFA method). This is physics — the CFA discarded the photons — and no processing recovers it.
-- **`flat` has the worst per-pixel noise** (−0.82 EV vs mono): red photosites are amplified 2.63× by equalization, so noise is both higher and *spatially patterned* (a gain checkerboard). Downsampled to the bin grid it becomes exactly bin luma (150.3) — the two are the same measurement at different scales.
+- **Binning buys back the monochrome sensor's per-pixel SNR.** bin G matches the mono sensor per pixel (133 vs 134) — at half the resolution. bin luma exceeds it slightly by averaging all four photosites. Read this claim precisely: it compares bin's 25 MP pixels against the mono sensor's 100 MP pixels. A mono sensor *of the same output resolution* — same area, photosites twice as wide — collects every photon of the 2×2 quad unfiltered and is 2 stops ahead (next bullet).
+- **At matched display scale the monochrome sensor wins by 1.5–2.0 stops over everything** (268.1 vs 157.6 for the best CFA method, vs 133.2 for bin G). The photon budget explains it exactly: over one 2×2 quad the mono sensor collects 8.0 units against the quad's total CFA yield of 3.0 (R 0.38 + G 1 + G 1 + B 0.62) and bin G's green-only 2.0. bin G therefore gives up one stop to the green passband and a second stop to using half the photosites; the luma and demosaic pipelines recover part of the second stop by using all four sites, at a further small cost from the white-balance gain weighting. This is physics — the CFA never collected the photons — and no processing recovers it.
+- **These gaps are scale-invariant.** Resampling every output to quincunx's grid instead of bin's multiplies each figure by the same √2, so the ratios, and the stop counts above, are unchanged. The choice of common output resolution does not favour any method.
+- **`flat` has the worst per-pixel noise** (−1.64 stops vs mono): red photosites are amplified 2.63× by equalization, so noise is both higher and *spatially patterned* (a gain checkerboard). Downsampled to the bin grid it becomes exactly bin luma (150.3) — the two are the same measurement at different scales.
 - **Demosaic+BW sits between**: interpolation averages neighboring samples, trading its resolution advantage for noise smoothing; at matched scale it is marginally the best CFA option (157.6) because it uses all photons at full grid density.
 - Read noise is negligible above 2 % here; at very low signal all CFA methods converge toward the same photon-starved penalty vs. mono.
 
@@ -171,7 +172,7 @@ What survives that concession is specific, and worth stating precisely:
 3. **Archival economics.** A capture already committed to monochrome and to the green rendering keeps a 30 MB `bin` DNG instead of a 203 MB raw — still linear, still with highlight headroom, openable anywhere. That "already committed" is doing real work, and it is the honest boundary of the use case.
 4. **Measurement-grade imaging.** Where pixel values must be measurements rather than estimates (astronomical stacking, reprography, technical documentation), super-pixel binning is standard practice for exactly the guarantees rwmono provides.
 
-Within those niches the recommendations stand: **`bin` G** as the default (bulletproof, monochrome-sensor per-pixel SNR, quarter-size files, chroma-immune), **`quincunx --derotate`** when resolution matters (~85 % of demosaiced H/V resolution, zero chromatic guessing), **`bin` luma** only for scenes without high-frequency color (§ 7), and **`flat`** as an expert option for low-saturation scenes. A true monochrome back retains a ~1-stop noise advantage at matched viewing scale that no CFA processing — rwmono's or a demosaicer's — can recover. That is physics, not software.
+Within those niches the recommendations stand: **`bin` G** as the default (bulletproof, monochrome-sensor per-pixel SNR, quarter-size files, chroma-immune), **`quincunx --derotate`** when resolution matters (~85 % of demosaiced H/V resolution, zero chromatic guessing), **`bin` luma** only for scenes without high-frequency color (§ 7), and **`flat`** as an expert option for low-saturation scenes. A true monochrome back of the same sensor area retains a 1.5–2.0 stop noise advantage at matched viewing scale that no CFA processing — rwmono's or a demosaicer's — can recover. That is physics, not software.
 
 # 7. Addendum: chroma-induced luminance hallucination
 

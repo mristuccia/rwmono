@@ -29,7 +29,7 @@ Each RGGB quad collapses to one output pixel. Two weightings:
 - **G** (default) — `(G1+G2)/2`, a pure green-channel image: the classic B&W green-filter rendering, using only the two most densely sampled, identically filtered photosites.
 - **luma** — `(R' + G1 + G2 + B')/4`, where `R'` and `B'` are equalized to green with the white-balance gains and clipped at green's saturation. All four measured photons contribute; noise is lowest.
 
-Half the linear resolution, a quarter of the pixels, nothing interpolated. Matches a true monochrome sensor's *per-pixel* SNR. This is the standard "super-pixel" mode of astrophotography stacking.
+Half the linear resolution, a quarter of the pixels, nothing interpolated. Its pixels match the *per-pixel* SNR of a monochrome sensor at the native pitch — though not that of a mono sensor at bin's own resolution, which would be 2 stops ahead. This is the standard "super-pixel" mode of astrophotography stacking.
 
 ### `flat` — full-resolution mosaic with channel equalization
 
@@ -51,24 +51,24 @@ The green photosites already form a square grid — rotated 45°, with pitch √
 
 The white paper's headline results, in one place — worth reading before choosing a mode:
 
-| Method | MTF50 (cyc/native px) | SNR @18 % (per pixel) | SNR @18 % (matched scale) |
-|---|---|---|---|
-| true mono sensor (simulated) | exact | 133.7 | **268.1** |
-| demosaic (DHT) + B&W | 0.45 | 95.5 | 157.6 |
-| `flat` | exact\* | 75.6 | 150.3 |
-| `quincunx --derotate` | 0.39 | 116.0 | 138.8 |
-| `bin luma` | 0.35 | **150.3** | 150.3 |
-| `bin g` | 0.35 | 133.2 | 133.2 |
+| Method | MTF50 (cyc/native px) | SNR @18 % (per pixel) | SNR @18 % (matched scale) | Behind mono, matched |
+|---|---|---|---|---|
+| true mono sensor (simulated) | exact | 133.7 | **268.1** | — |
+| demosaic (DHT) + B&W | 0.45 | 95.5 | 157.6 | 1.53 stops |
+| `flat` | exact\* | 75.6 | 150.3 | 1.67 stops |
+| `quincunx --derotate` | 0.39 | 116.0 | 138.8 | 1.90 stops |
+| `bin luma` | 0.35 | **150.3** | 150.3 | 1.67 stops |
+| `bin g` | 0.35 | 133.2 | 133.2 | 2.02 stops |
 
 \* on neutral content only.
 
 The honest summary:
 
 - **On neutral subjects, demosaicing does not lose luminance detail** — after white balance every photosite is a valid luminance sample there, and demosaicers exploit it. The project's founding intuition is refuted by its own data for typical scenes. For general-purpose B&W, demosaic-then-convert remains the rational default.
-- **Binning buys back the monochrome sensor's per-pixel SNR** at half the resolution, in quarter-size files.
+- **Binning buys back the monochrome sensor's per-pixel SNR** at half the resolution, in quarter-size files — a comparison of bin's 25 MP pixels against a mono sensor's 100 MP pixels, not against a 25 MP mono sensor.
 - **`quincunx` delivers ~85 % of demosaiced horizontal/vertical resolution** with zero chromatic guessing, and its anisotropy (full native Nyquist H/V, 0.354 diagonal) suits man-made subjects.
 - **Where the no-demosaic modes genuinely win** is fine saturated-color detail — textiles, distant signage, brick courses, halftones, screens, backlit foliage. There demosaicers hallucinate luminance from chroma at up to **1.7× the true amplitude and at frequencies the scene does not contain**, permanently baked into the B&W result. `bin g` and `quincunx` are immune by construction. See §7 of the paper.
-- **A true monochrome back keeps a ~1-stop advantage** at matched viewing scale that no CFA processing can recover. That is physics, not software.
+- **A true monochrome back of the same sensor area keeps a 1.5–2.0 stop advantage** at matched viewing scale that no CFA processing can recover. `bin g` gives up one stop to the green passband and a second to using half the photosites. That is physics, not software.
 
 Recommendations: **`bin g`** as the safe default, **`quincunx --derotate`** when resolution matters, **`bin luma`** for scenes without high-frequency color, **`flat`** as an expert option for low-saturation scenes.
 
