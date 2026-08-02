@@ -10,6 +10,8 @@ It ships with a companion white paper that measures what the technique actually 
 
 ![bin mode of the reference capture](docs/figures/preview_bin_g.jpg)
 
+_NOTE: this project has been realized with a huge support of AI coding. If you’re not comfortable with the use of AI in development, this project isn’t for you._ 
+
 ---
 
 ## Why
