@@ -7,7 +7,7 @@ date: "August 2026"
 
 # Abstract
 
-Bayer-sensor cameras convert to black & white by first demosaicing — interpolating three color values at every photosite — and then discarding the color. This estimates values that were never measured, and for monochrome output the estimation is unnecessary. **rwmono** is a command-line tool that converts Bayer raw files (developed against Hasselblad `.3FR`; any LibRaw-supported Bayer format works) directly into monochrome linear DNG files using three interpolation-free strategies: 2×2 super-pixel binning, full-resolution channel equalization, and quincunx re-indexing of the green lattice. This paper describes the science behind each strategy, the implementation (including a from-scratch lossless-JPEG DNG writer), and a quantitative comparison of resolution and noise against conventional demosaic-plus-BW conversion and against a simulated true monochrome sensor. The headline results: on neutral subjects demosaicing retains *more* detail than green-only methods (every CFA pixel is a valid luminance sample there), and the equalized-mosaic mode is exact; the quincunx mode delivers about 85 % of demosaiced horizontal/vertical resolution with zero invented pixels; binning matches a monochrome sensor's per-pixel SNR at half resolution; and a true monochrome sensor of the same area retains an unbeatable 1.5–2 stop noise advantage at matched output scale that no CFA processing can recover.
+Bayer-sensor cameras convert to black & white by first demosaicing — interpolating three color values at every photosite — and then discarding the color. This estimates values that were never measured, and for monochrome output the estimation is unnecessary. **rwmono** is a command-line tool that converts Bayer raw files (developed against Hasselblad `.3FR`; any LibRaw-supported Bayer format works) directly into monochrome linear DNG files using three interpolation-free strategies: 2×2 super-pixel binning, full-resolution channel equalization, and quincunx re-indexing of the green lattice. This paper describes the science behind each strategy, the implementation (including a from-scratch lossless-JPEG DNG writer), and a quantitative comparison of resolution and noise against conventional demosaic-plus-BW conversion and against a simulated true monochrome sensor. The headline results: on neutral subjects demosaicing retains *more* detail than green-only methods (every CFA pixel is a valid luminance sample there), and the equalized-mosaic mode is exact; the quincunx mode delivers about 85 % of demosaiced horizontal/vertical resolution with zero invented pixels; binning matches a monochrome sensor's per-pixel SNR at half resolution; and a true monochrome sensor of the same area retains an unbeatable 1.5–2 stop noise advantage at matched output scale that no CFA processing can recover. A fourth refinement, adapted from Phase One's Sensor⁺ super-pixel geometry, replaces the green sampling aperture with a diamond matched to the green lattice and removes 3× of binning's moiré without interpolating anything.
 
 # 1. Background and motivation
 
@@ -51,19 +51,48 @@ Two practical additions:
 - **Gr/Gb equalization.** The two greens of each quad can differ slightly (crosstalk from neighboring red vs. blue rows). On the rotated grid they occupy alternating diagonals, so an imbalance renders as a lattice. rwmono measures the global Gr/Gb ratio per file and equalizes it (on the test camera: 1.00283, i.e. 0.28 %).
 - **`--derotate`.** One bicubic (Catmull-Rom) resample maps the rotated grid back to an upright frame of $W/\sqrt{2} \times H/\sqrt{2}$ pixels — the same pixel count as the number of green samples, so no fake resolution is created. This is the single spatial (never chromatic) interpolation a user can opt into; the lattice-faithful mapping preserves the anisotropic frequency support described above.
 
-## 2.4 What none of these can do
+## 2.4 `--diamond` — a Sensor⁺-inspired green aperture
+
+`bin` G and `quincunx` both sample the green lattice, and both do so with a poor decimation pre-filter. `bin` G averages the two greens that happen to fall inside a quad; `quincunx` averages nothing at all. Neither aperture is matched to the lattice being sampled, and § 5.4 shows what that costs.
+
+The fix is not new. Phase One's Sensor⁺ (P 40+/P 65+/IQ backs, 2009) attacked exactly this problem for *color* binning (Borchenko, 2009). Their analysis of conventional Bayer binning — group the four same-coloured photosites spread across a 4×4 block — is that the resulting green super-pixels are large squares separated by gaps, so that "large holes exist and some data areas do not even touch", and the effective resolving power collapses toward 1/16 rather than the expected 1/4. Sensor⁺ instead groups each set of four greens into a **diamond**: a 45°-rotated square whose four members are mutual nearest neighbours on the green lattice, centred on an R or B site. Those diamonds tile the plane with no gaps and no overlap. In Phase One's own words, "the data from the green pixels is changed in orientation so that each super pixel includes data in a much more even pattern."
+
+That reorientation is the quincunx re-indexing of § 2.3, arrived at from the aliasing side rather than the sampling side — the same lattice, reached from opposite directions.
+
+The two problems then diverge, and the divergence matters. Sensor⁺ must preserve a *colour* mosaic: its output is still Bayer, so Gr and Gb remain separate colour planes and each is binned within itself. A Sensor⁺ green super-pixel is therefore a diamond of four photosites of a **single** green type, whose nearest-neighbour spacing on that sub-lattice is $2\sqrt2$ native pixels.
+
+A monochrome target has no such constraint. Gr and Gb are the same measurement here (up to the small imbalance of § 2.3, which is corrected), so the natural diamond is simply the **four nearest greens of either type** surrounding an R or B site — spacing $\sqrt2$, half the footprint of the colour-preserving version and correspondingly better conditioned as a decimation pre-filter. Under the basis $e_1=(1,1)$, $e_2=(-1,1)$ those four greens map to four *adjacent* output pixels, so the operation reduces to a plain 2×2 box average on the re-indexed grid.
+
+rwmono exposes this as `--diamond`, at two scales:
+
+- **`bin --diamond`** — average the four greens surrounding each R site instead of the two inside each quad. The centroid lands on the R lattice, an upright square grid of pitch 2, so the output geometry is unchanged: same pixel count, same framing as `bin` G. Each super-pixel contains two Gr and two Gb, so the Gr/Gb imbalance cancels in the mean without an explicit correction. Neighbouring super-pixels share photosites — this is an overlapping filter, not a decimation, and collects no extra light.
+- **`quincunx --diamond`** — non-overlapping 2×2 decimation on the re-indexed grid, at half the linear resolution of `quincunx` and a quarter of its pixels.
+
+The aperture's transfer function follows directly. With the four taps at $(\pm 1, 0)$ and $(0, \pm 1)$ native pixels, i.e. $(\pm\tfrac12, 0)$ and $(0, \pm\tfrac12)$ in output pixels,
+
+$$H(f_x, f_y) = \tfrac{1}{2}\left[\cos(\pi f_x) + \cos(\pi f_y)\right]$$
+
+which is isotropic to first order and rolls off toward the diamond Brillouin zone of the lattice it samples — the correct shape, as § 2.3 argues. Contrast this with `bin` G's two taps, which lie on a single diagonal and give $H = \cos\left(\pi (f_x - f_y)/2\right)$: identically **1.0** along the perpendicular diagonal, at every frequency up to Nyquist. `bin` G supplies no anti-aliasing whatsoever in that direction. § 5.4 measures both predictions and confirms them to three decimals.
+
+On attribution and scope: Sensor⁺ solved the *colour* case — carrying a Bayer mosaic through binning with its four colour planes intact and their optical centres on a uniform grid. `--diamond` addresses the *monochrome* case, where the operation reduces to a 4-neighbour average on a quincunx lattice followed by decimation: standard multirate sampling theory, well established long before 2007 (cf. Dubois, 2005, and the quincunx-lattice literature it draws on). Phase One's white paper is credited for the insight that a diamond arrangement is the right answer to Bayer binning's aliasing; it is not a source of design or code, and no part of Sensor⁺'s implementation was available to or used by this project. The colour-preserving method is the subject of Phase One's patent family US 7,929,807 / EP 1,887,515 / JP 4,805,294, whose claims require generating macro pixels for all four CFA planes on a uniform optical-centre grid — steps this monochrome, green-only implementation neither performs nor needs. Sensor⁺ is a trademark of Phase One A/S, used here descriptively; this project is not affiliated with, sponsored by, or endorsed by Phase One.
+
+Two honest caveats carry into the results. First, the part of Sensor⁺ that made it a hardware product — summing charge *inside the sensor, before the amplifier*, so that four photosites' electrons are read once and cost one read-noise event instead of four — cannot be reproduced downstream of the ADC. Averaging four digitised samples halves read noise; charge binning quarters it. Second, `--diamond` remains an average of measured photosites: a filter, not an interpolation. No unmeasured value is ever estimated, and the project's founding guarantee is intact.
+
+## 2.5 What none of these can do
 
 A green-only image is the scene *through a green filter*, not scene luminance. A CFA photosite also discards roughly half the photons a filterless one would collect (one stop), and the green-only modes discard half the photosites on top of that (a second stop). Section 5 quantifies both points.
 
 # 3. Implementation
 
-rwmono is ~900 lines of dependency-light C++17 (LibRaw is the only external library), organized as:
+rwmono is ~960 lines of dependency-light C++17 (LibRaw is the only external library), organized as:
 
 - **`main.cpp`** — CLI, LibRaw unpacking, black-level handling (common base + per-channel deltas + repeating pattern blocks), CFA-phase-aware processing for all three strategies, and the derotation resampler. All modes run in 0.5–2.5 s for a 100 MP file on Apple Silicon.
 - **`dng_writer.cpp`** — a from-scratch monochrome DNG writer. A monochrome DNG is a TIFF with `PhotometricInterpretation = LinearRaw`, `SamplesPerPixel = 1`, and no CFA tags; per the DNG specification, `ColorMatrix1` is required only for non-monochrome files and is correctly omitted. Camera make/model, `UniqueCameraModel` (annotated with the conversion mode), orientation, black/white levels, and an EXIF block (ISO, shutter, aperture, focal length, capture date) are carried over from the source raw.
 - **`ljpeg_encoder.cpp`** — a from-scratch lossless JPEG encoder (ITU-T T.81 process 14, SOF3), the only compression the DNG spec permits for 16-bit integer raw data and the same scheme Adobe writes. It builds an optimal Huffman table per image (Annex K algorithm with 16-bit length limiting), uses predictor 1, and byte-stuffs markers. Compression is on by default and **bit-exact**: outputs decoded through LibRaw's independent lossless-JPEG decoder are MD5-identical to the uncompressed path.
 
 Output DNGs validate cleanly (`exiftool -validate`) and open in LibRaw-based software and Apple's native raw pipeline.
+
+A measurement harness lives in **`tools/`** (Python, numpy only). It synthesises Bayer captures of analytically known ground truth under the photon model of § 5.1, writes them as real CFA DNGs, and runs the shipping binary on them — so it measures the released code path rather than a reimplementation of it. `tools/README.md` documents the model, the validation against § 5.3, and the metrics' known limitations.
 
 # 4. Using rwmono
 
@@ -73,6 +102,11 @@ Build (macOS, Homebrew): `brew install libraw cmake`, then `cmake -B build && cm
 usage: rwmono <bin|flat|quincunx> <input raw> [options]
   -o <file>            output DNG path (default: input name + _<mode>.dng)
   --weights <g|luma>   bin mode: G-only or (R+2G+B)/4 luma (default g)
+  --diamond            Sensor+-style 4-green diamond aperture:
+                       bin      same output size, 4-tap diamond instead of
+                                the 2-tap diagonal pair
+                       quincunx additionally decimate 2x on the green
+                                lattice (half linear resolution)
   --wb <asshot|R,G,B>  channel gains for equalization (default asshot)
   --no-grgb            quincunx: skip Gr/Gb equalization
   --derotate           quincunx: bicubic resample back to an upright frame
@@ -90,6 +124,9 @@ All commands below were run against the reference capture used throughout this p
 | `rwmono flat IMG.3FR` | 11 664 × 8 750 | 168 MB | native res; neutral scenes only |
 | `rwmono quincunx IMG.3FR` | 10 207 × 10 206 | 91 MB | 45°-rotated diamond, purest mode |
 | `rwmono quincunx IMG.3FR --derotate` | 8 246 × 6 186 | 60 MB | upright, one spatial resample |
+| `rwmono bin IMG.3FR --diamond` | 5 832 × 4 375 | 30 MB | Sensor⁺ aperture; 3× less moiré |
+| `rwmono quincunx IMG.3FR --diamond` | 5 103 × 5 103 | 19 MB | Sensor⁺ geometry; high-ISO mode |
+| `rwmono quincunx IMG.3FR --diamond --derotate` | 4 123 × 3 093 | 15 MB | upright, lowest noise per pixel |
 
 ![Example conversion: `bin` mode of the reference capture (Berlin, CFV-100c).](figures/preview_bin_g.jpg){width=6in}
 
@@ -118,7 +155,7 @@ All commands below were run against the reference capture used throughout this p
 | quincunx derotated | 0.39 | 0.55 | 0.41 | 0.37 | 0.354–0.50 |
 | bin 2×2 (g ≡ luma here) | 0.35 | 0.51 | 0.35 | 0.37 | 0.25 |
 
-*Frequencies in cycles/native pixel. "exact\*": response ≈ 1.0 across the measured range — on a neutral scene these methods reproduce the sampled scene with no reconstruction error. For `flat` this guarantee **only** holds on neutral content (§ 5.4).*
+*Frequencies in cycles/native pixel. "exact\*": response ≈ 1.0 across the measured range — on a neutral scene these methods reproduce the sampled scene with no reconstruction error. For `flat` this guarantee **only** holds on neutral content (§ 5.5).*
 
 Key observations:
 
@@ -151,7 +188,53 @@ Reading the table:
 - **Demosaic+BW sits between**: interpolation averages neighboring samples, trading its resolution advantage for noise smoothing; at matched scale it is marginally the best CFA option (157.6) because it uses all photons at full grid density.
 - Read noise is negligible above 2 % here; at very low signal all CFA methods converge toward the same photon-starved penalty vs. mono.
 
-## 5.4 Real-image verification (Hasselblad CFV-100c capture)
+## 5.4 The diamond aperture measured
+
+The figures in § 5.2 and § 5.3 were produced by an earlier, ad-hoc simulation. The `--diamond` results below come from a reproducible harness (`tools/`, § 3) that synthesises the same photon model, writes real CFA DNGs, and runs the shipping binary on them. As a control it reproduces the § 5.3 table to under 1 % — mono 133.7, `bin` G 134.0, `bin` luma 151.4, `flat` 75.5, `quincunx --derotate` 116.4 — so the new columns are directly comparable to the old ones.
+
+**Aliasing.** Zone-plate energy beyond each method's own grid Nyquist, where a correct system produces uniform grey and anything else is moiré. Lower is better:
+
+| Method | beyond-Nyquist σ | with `--diamond` | reduction |
+|---|---|---|---|
+| bin G | 14.10 % | **4.72 %** | 3.0× |
+| quincunx derotated | 17.43 % | **5.25 %** | 3.3× |
+
+**Aperture transfer functions**, measured against the closed forms of § 2.4:
+
+| Grating | `bin` G | `bin --diamond` | predicted |
+|---|---|---|---|
+| horizontal, 0.10 cyc/native px | 0.966 | 0.923 | 0.905 |
+| horizontal, 0.20 | 0.821 | 0.665 | 0.654 |
+| diagonal, 0.10 | **1.000** | 0.906 | 0.903 |
+| diagonal, 0.20 | **1.000** | 0.633 | 0.630 |
+
+The prediction of § 2.4 is confirmed exactly, including its uncomfortable half: `bin` G's response along the diagonal perpendicular to its tap pair is **1.000 at every frequency up to Nyquist**. Its two greens sit at identical $x+y$ and therefore see identical phase. That is the origin of bin's moiré — not a gentle roll-off that misses a little energy, but a filter that is simply absent in one direction.
+
+**Is it a pre-filter, or just blur?** A low-pass reduces aliasing and noise together, so the gain must be tested against the alternative of blurring `bin` G afterwards. Sweeping a post-blur on the `bin` G output and tracing the (in-band contrast, beyond-Nyquist energy) trade-off curve:
+
+- matched to `--diamond`'s in-band contrast, post-blur leaves **≈ 2× the aliasing**;
+- matched to `--diamond`'s aliasing, post-blur costs **28 % of the in-band detail**.
+
+`--diamond` lies outside the curve reachable by any post-processing, which is the expected result and the reason it is worth implementing: the filter acts *before* decimation, suppressing energy that would otherwise fold irreversibly into the passband. Nothing downstream can unfold it.
+
+**Noise.**
+
+| Method | SNR @18 %, per pixel | vs. its non-diamond form |
+|---|---|---|
+| bin G | 134.0 | — |
+| bin G `--diamond` | 188.8 | ×1.41 |
+| quincunx derotated | 116.4 | — |
+| quincunx `--diamond` derotated | 232.1 | ×1.99 |
+
+On the reference Hasselblad capture, measured on the forty flattest 96×96 tiles, `bin` G's high-pass σ falls from 31.26 DN to 21.50 DN — a ratio of **1.454** against the predicted $\sqrt2 = 1.414$, the small excess being residual scene detail in tiles that are not perfectly flat.
+
+**This SNR gain must not be misread**, and it does not narrow the gap of § 5.3. `bin --diamond` is an overlapping filter: it collects no photons `bin` G did not already collect, and its lower noise is the ordinary noise-for-resolution trade, paid for in the MTF column above. The trade is available to *any* sensor. Give the simulated monochrome sensor the same diamond aperture and it moves from 267.3 to 396.9, leaving the gap at **2.14 stops** — statistically unchanged from `bin` G's 2.02. The photon budget is untouched; § 5.3 and § 6 stand exactly as written.
+
+`quincunx --diamond` is a different case: it is a true non-overlapping decimation, so its ×1.99 is a genuine four-photosite average, traded against half the linear resolution. At matched display scale it, too, changes nothing.
+
+![Zone plate, 45 % of full scale, gamma-encoded. Left: `bin` G — the outer field is filled with moiré rings the scene does not contain. Centre: `bin` G blurred to the same MTF. Right: `bin --diamond`, which keeps the centre's contrast while suppressing the outer rings.](figures/diamond_zoneplate.png){width=6.5in}
+
+## 5.5 Real-image verification (Hasselblad CFV-100c capture)
 
 ![Matched 100 % crops (a common display tone curve is applied to all panels; measurements in this paper always use the linear data). DHT and `flat` are indistinguishable on the neutral wall; `flat` shows its chroma checkerboard on the colored foliage and hat; quincunx is close to DHT with slightly softer diagonals; bin is visibly but gracefully softer.](figures/compare_windows.png){width=6.5in}
 
@@ -172,7 +255,9 @@ What survives that concession is specific, and worth stating precisely:
 3. **Archival economics.** A capture already committed to monochrome and to the green rendering keeps a 30 MB `bin` DNG instead of a 203 MB raw — still linear, still with highlight headroom, openable anywhere. That "already committed" is doing real work, and it is the honest boundary of the use case.
 4. **Measurement-grade imaging.** Where pixel values must be measurements rather than estimates (astronomical stacking, reprography, technical documentation), super-pixel binning is standard practice for exactly the guarantees rwmono provides.
 
-Within those niches the recommendations stand: **`bin` G** as the default (bulletproof, monochrome-sensor per-pixel SNR, quarter-size files, chroma-immune), **`quincunx --derotate`** when resolution matters (~85 % of demosaiced H/V resolution, zero chromatic guessing), **`bin` luma** only for scenes without high-frequency color (§ 7), and **`flat`** as an expert option for low-saturation scenes. A true monochrome back of the same sensor area retains a 1.5–2.0 stop noise advantage at matched viewing scale that no CFA processing — rwmono's or a demosaicer's — can recover. That is physics, not software.
+5. **The sampling aperture was the cheapest win available.** § 5.4 found that `bin` G, the mode recommended as the safe default, has *no* anti-aliasing along one diagonal — its two greens see identical phase there. Borrowing Phase One's Sensor⁺ geometry (`--diamond`) removes 3× of the moiré for a modest, measured loss of in-band contrast, and does so as a genuine pre-decimation filter that no post-processing can imitate. It changes nothing about the photon budget; it simply stops throwing away the aliasing margin the green lattice was already offering.
+
+Within those niches the recommendations stand: **`bin` G** as the default (bulletproof, monochrome-sensor per-pixel SNR, quarter-size files, chroma-immune), **`bin --diamond`** whenever the subject is moiré-prone and a small loss of acutance is acceptable, **`quincunx --derotate`** when resolution matters (~85 % of demosaiced H/V resolution, zero chromatic guessing), **`quincunx --diamond`** as a low-light/small-file mode, **`bin` luma** only for scenes without high-frequency color (§ 7), and **`flat`** as an expert option for low-saturation scenes. A true monochrome back of the same sensor area retains a 1.5–2.0 stop noise advantage at matched viewing scale that no CFA processing — rwmono's or a demosaicer's — can recover. That is physics, not software.
 
 Bottom line:
 **▎ bin G and quincunx reach a real monochrome sensor's resolution at their output size, and quincunx's lattice is arguably better oriented than a square grid of the same pixel count. They do not reach its (lower) noise: at matched output scale they sit ~2 stops behind, and they render through a green filter rather than panchromatically. A mono back's advantage is light collection, and that is bought at capture time.
@@ -230,3 +315,4 @@ This is the practical summary of the whole section: demosaicing errs by **invent
 - ITU-T Recommendation T.81 (JPEG), Annex H (lossless processes) and Annex K (Huffman table generation), 1992.
 - Adobe Systems, *Digital Negative (DNG) Specification*, version 1.4.
 - LibRaw LLC, *LibRaw* raw decoding library; *Monochrome2DNG* converter, FastRawViewer.
+- W. Borchenko, "Phase One Patent Pending Sensor⁺ Explained," Phase One / Capture-U, 2009. (Source of the diamond super-pixel geometry adapted in § 2.4.)

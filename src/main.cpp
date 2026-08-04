@@ -36,6 +36,11 @@ void usage() {
       "usage: rwmono <bin|flat|quincunx> <input raw> [options]\n"
       "  -o <file>          output DNG path (default: input name + _<mode>.dng)\n"
       "  --weights <g|luma> bin mode only: G-only or (R+2G+B)/4 luma (default g)\n"
+      "  --diamond          Sensor+-style 4-green diamond aperture:\n"
+      "                     bin      same output size, 4-tap diamond instead of\n"
+      "                              the 2-tap diagonal pair\n"
+      "                     quincunx additionally decimate 2x on the green\n"
+      "                              lattice (half linear resolution)\n"
       "  --wb <asshot|R,G,B> channel gains for equalization (default asshot)\n"
       "  --no-grgb          quincunx mode only: skip Gr/Gb equalization\n"
       "  --derotate         quincunx: bicubic-resample back to an upright frame\n"
@@ -88,6 +93,7 @@ int main(int argc, char** argv) {
   bool derotate = false;
   bool autocrop = false;
   bool compress = true;
+  bool diamond = false;
   for (int i = 3; i < argc; i++) {
     std::string a = argv[i];
     if (a == "-o" && i + 1 < argc) output = argv[++i];
@@ -96,6 +102,7 @@ int main(int argc, char** argv) {
     else if (a == "--no-grgb") grgbFix = false;
     else if (a == "--derotate") derotate = true;
     else if (a == "--autocrop") autocrop = true;
+    else if (a == "--diamond") diamond = true;
     else if (a == "--uncompressed") compress = false;
     else {
       std::fprintf(stderr, "unknown option: %s\n", a.c_str());
@@ -111,12 +118,21 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "--derotate/--autocrop only apply to quincunx mode\n");
     return 2;
   }
+  if (diamond && mode == "flat") {
+    std::fprintf(stderr, "--diamond only applies to bin and quincunx modes\n");
+    return 2;
+  }
+  if (diamond && mode == "bin" && weights == "luma") {
+    std::fprintf(stderr, "--diamond is a green-lattice aperture; use --weights g\n");
+    return 2;
+  }
   if (output.empty()) {
     std::string base = input;
     size_t dot = base.find_last_of('.');
     if (dot != std::string::npos && dot > base.find_last_of('/') + 0)
       base.resize(dot);
-    output = base + "_" + mode + (derotate ? "-derot" : "") + ".dng";
+    output = base + "_" + mode + (diamond ? "-diamond" : "") +
+             (derotate ? "-derot" : "") + ".dng";
   }
 
   LibRaw lr;
@@ -253,12 +269,43 @@ int main(int argc, char** argv) {
       }
     }
 
+    if (diamond) {
+      // Phase One's Sensor+ introduced the diamond super-pixel to stop binned
+      // apertures leaving gaps. It bins each green plane within itself,
+      // because its output must stay in colour; a monochrome target does not
+      // need that, so the natural diamond here is the four *nearest* greens
+      // (either Gr or Gb) surrounding one R/B site -- half the footprint.
+      // Under the re-indexing above those four are exactly a 2x2 block, so a
+      // plain non-overlapping 2x2 decimation tiles the green lattice with no
+      // gaps and no overlap. Still an average of measured photosites only --
+      // nothing is interpolated. See NOTICE.
+      const uint32_t bW = outW / 2, bH = outH / 2;
+      std::vector<uint16_t> b((size_t)bW * bH);
+      for (uint32_t i = 0; i < bH; i++) {
+        const uint16_t* r0 = &out[(size_t)(2 * i) * outW];
+        const uint16_t* r1 = &out[(size_t)(2 * i + 1) * outW];
+        for (uint32_t j = 0; j < bW; j++) {
+          const uint32_t s = (uint32_t)r0[2 * j] + r0[2 * j + 1] +
+                             r1[2 * j] + r1[2 * j + 1];
+          b[(size_t)i * bW + j] = (uint16_t)((s + 2) / 4);
+        }
+      }
+      out = std::move(b);
+      outW = bW;
+      outH = bH;
+      std::printf("diamond:  2x2 green-lattice bin -> %u x %u\n", outW, outH);
+    }
+
+    // Pitch of the current grid in green-lattice units: 1 normally, 2 after
+    // the diamond decimation.
+    const float qs = diamond ? 2.0f : 1.0f;
+
     if (derotate) {
       // One spatial resample back to an upright frame: output pixel (x,y)
       // corresponds to scene point (r,c) = (y*sqrt2, x*sqrt2); map that into
       // quincunx grid coordinates and sample with bicubic Catmull-Rom.
-      const uint32_t W2 = (uint32_t)std::floor((W - 1) / M_SQRT2);
-      const uint32_t H2 = (uint32_t)std::floor((H - 1) / M_SQRT2);
+      const uint32_t W2 = (uint32_t)std::floor((W - 1) / (M_SQRT2 * qs));
+      const uint32_t H2 = (uint32_t)std::floor((H - 1) / (M_SQRT2 * qs));
       std::vector<uint16_t> up((size_t)W2 * H2);
       auto wcr = [](float t, float w[4]) {
         w[0] = ((-0.5f * t + 1.0f) * t - 0.5f) * t;
@@ -267,12 +314,15 @@ int main(int argc, char** argv) {
         w[3] = (0.5f * t - 0.5f) * t * t;
       };
       const int qw = (int)outW, qh = (int)outH;
+      // A binned pixel (I,J) covers quincunx cells 2I..2I+1, so its centre
+      // sits at 2I+0.5 -- hence the half-cell shift before the qs division.
+      const float half = (qs - 1.0f) * 0.5f;
       for (uint32_t y = 0; y < H2; y++) {
-        const float rr = (float)(y * M_SQRT2);
+        const float rr = (float)(y * M_SQRT2 * qs);
         for (uint32_t x = 0; x < W2; x++) {
-          const float cc = (float)(x * M_SQRT2);
-          const float fi = (rr + cc - c0) * 0.5f;
-          const float fj = (cc - c0 - rr) * 0.5f - jMin;
+          const float cc = (float)(x * M_SQRT2 * qs);
+          const float fi = ((rr + cc - c0) * 0.5f - half) / qs;
+          const float fj = ((cc - c0 - rr) * 0.5f - jMin - half) / qs;
           const int i0 = (int)std::floor(fi), j0 = (int)std::floor(fj);
           float wi[4], wj[4];
           wcr(fi - i0, wi);
@@ -298,8 +348,8 @@ int main(int argc, char** argv) {
       // Largest axis-aligned rectangle inscribed in the diamond is the
       // centered square with half-side (H-1)/4 (H being the short mosaic
       // dimension) -- a large part of the frame necessarily falls outside.
-      const int s2 = (H - 1) / 4;
-      const int ic = iMax / 2, jc = ((int)outW - 1) / 2;
+      const int s2 = (int)((H - 1) / (4.0f * qs));
+      const int ic = ((int)outH - 1) / 2, jc = ((int)outW - 1) / 2;
       cropO[0] = (uint32_t)(jc - s2);
       cropO[1] = (uint32_t)(ic - s2);
       cropS[0] = cropS[1] = (uint32_t)(2 * s2);
@@ -313,6 +363,40 @@ int main(int argc, char** argv) {
       for (int c = 0; c < W; c++) {
         int ch = lr.COLOR(r, c);
         float v = (rawAt(r, c) - blackFor(r, c, ch)) * gains[ch];
+        out[(size_t)r * outW + c] = clamp16(v * scale);
+      }
+    }
+  } else if (mode == "bin" && diamond) {
+    // The same diamond aperture at bin's output scale: instead of the two greens that
+    // happen to fall inside a quad, average the four greens that surround one
+    // R site. The centroid lands on the R lattice -- an upright square grid of
+    // pitch 2, the same geometry bin already outputs -- and the aperture is a
+    // diamond matched to the green lattice's Brillouin zone rather than a
+    // 2-tap diagonal. Two Gr and two Gb per super-pixel, so the Gr/Gb
+    // imbalance cancels in the mean without an explicit correction.
+    outW = W / 2;
+    outH = H / 2;
+    out.resize((size_t)outW * outH);
+    int dr0 = 0, dc0 = 0;
+    for (int dr = 0; dr < 2; dr++)
+      for (int dc = 0; dc < 2; dc++)
+        if (lr.COLOR(dr, dc) == 0) { dr0 = dr; dc0 = dc; }
+    std::printf("diamond:  4-green diamond centred on R sites at (%d,%d)\n",
+                dr0, dc0);
+    for (uint32_t r = 0; r < outH; r++) {
+      for (uint32_t c = 0; c < outW; c++) {
+        const int rr = 2 * (int)r + dr0, cc = 2 * (int)c + dc0;
+        // Mirror at the border rather than clamp: r-1 and r+1 share a parity,
+        // so the substitute site is still green.
+        const int rm = (rr - 1 >= 0) ? rr - 1 : rr + 1;
+        const int rp = (rr + 1 < H) ? rr + 1 : rr - 1;
+        const int cm = (cc - 1 >= 0) ? cc - 1 : cc + 1;
+        const int cp = (cc + 1 < W) ? cc + 1 : cc - 1;
+        const float v = (rawAt(rm, cc) - blackFor(rm, cc, lr.COLOR(rm, cc)) +
+                         rawAt(rp, cc) - blackFor(rp, cc, lr.COLOR(rp, cc)) +
+                         rawAt(rr, cm) - blackFor(rr, cm, lr.COLOR(rr, cm)) +
+                         rawAt(rr, cp) - blackFor(rr, cp, lr.COLOR(rr, cp))) *
+                        0.25f;
         out[(size_t)r * outW + c] = clamp16(v * scale);
       }
     }
@@ -352,7 +436,7 @@ int main(int argc, char** argv) {
   meta.model = P.model;
   meta.uniqueModel = std::string(P.make) + " " + P.model +
                      " (rwmono " + mode + (mode == "bin" ? "/" + weights : "") +
-                     (derotate ? "/derot" : "") + ")";
+                     (diamond ? "/diamond" : "") + (derotate ? "/derot" : "") + ")";
   meta.software = "rwmono 0.1";
   meta.dateTime = formatTime(lr.imgdata.other.timestamp);
   meta.orientation = flipToOrientation(S.flip);

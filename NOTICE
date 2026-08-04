@@ -1,0 +1,70 @@
+rwmono — third-party notices
+============================
+
+Dependencies
+------------
+
+LibRaw is the only external library. It is dual-licensed LGPL-2.1 / CDDL-1.0;
+rwmono relies on the LGPL-2.1 option, which is compatible with GPLv3.
+
+No third-party source code is vendored in this repository. Every file under
+src/ and tools/ was written for this project.
+
+
+Phase One Sensor+ — attribution and scope of `--diamond`
+--------------------------------------------------------
+
+The `--diamond` option was inspired by a published Phase One white paper
+(W. Borchenko, "Phase One Patent Pending Sensor+ Explained", 2009), which
+identifies the diamond-shaped super-pixel as the fix for the aliasing that
+conventional Bayer binning produces. That document is credited in section 2.4
+of docs/rwmono-whitepaper.md as the source of the insight. It is not a source
+of code or design: no Phase One software, specification or figure was used,
+and no figure from that document is reproduced anywhere in this repository.
+
+Sensor+ is a trademark of Phase One A/S. References to it here are descriptive
+(nominative) use, identifying whose published work prompted the approach. This
+project is not affiliated with, sponsored by, or endorsed by Phase One A/S.
+
+### Patent awareness
+
+Phase One holds a patent family on the *colour* binning method described in
+that white paper:
+
+    US 7,929,807 B2   filed 2007-02-27, expires approx. 2030-02-18
+    EP 1,887,515 B1   granted 2011-12-28, expires 2027-02-27
+    JP 4,805,294 B2   granted
+
+Its independent claims are not limited to in-sensor processing — claim 1
+expressly recites a method "performed on at least one of an image sensor, a
+processing circuit, an external processing device, a processing device, or a
+computer processor" — and claim 15 covers a computer program product. Software
+implementations are therefore within the intended scope of the claims.
+
+What claim 1 requires, and `--diamond` does not do:
+
+  * generate a macro pixel from n x n *first* (red) pixels;
+  * generate a macro pixel from n x n *fourth* (blue) pixels;
+  * generate *separate* macro pixels for the second (Gr) and third (Gb) green
+    planes, each from n x n photosites of a single green type, on two
+    45-degree-rotated squares;
+  * place the optical centres of the first, second and third macro pixels at
+    identical relative positions so that they form a uniform grid.
+
+`--diamond` is a monochrome operation. It discards red and blue entirely,
+produces no colour mosaic and no uniform multi-plane optical-centre grid, and
+its single green macro pixel averages two Gr and two Gb photosites together
+rather than binning either green plane within itself. What remains — a
+four-neighbour average on a quincunx lattice followed by decimation — is
+long-established multirate sampling theory that predates the 2007 priority
+date by decades.
+
+### Constraint on future work
+
+While the patents above remain in force, `--diamond` (or any successor) must
+NOT be extended to emit a binned *colour* mosaic: no half-resolution RGGB
+output, and no separate Gr/Gb macro pixels on their own grids. Either change
+would track claim 1 element for element. Revisit after February 2030.
+
+This notice records the project's own analysis and is offered for transparency.
+It is not legal advice and is not a freedom-to-operate opinion.
