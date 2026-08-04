@@ -1,4 +1,4 @@
-# rwmono — monochrome raw conversion without demosaicing
+# rwmono — monochrome raw conversion without demosaicing for CFA sensors
 
 `rwmono` converts Bayer-sensor raw files directly into **monochrome linear DNG** files, without ever demosaicing. No missing color value is interpolated, no luminance is invented: every output pixel is derived arithmetically from photosites that were actually measured.
 
