@@ -228,7 +228,7 @@ The following comparison shows two very magnified crops of the same image treate
 
 1. **Top Crop** : 3FR 100mpxl raw image opened in Photoshop, treated in ACR at default settings, converted into monochrome with PS Channel Mixer (red: 0%, green: 100%, blue: 0%) to simulate a green-filtered monochrome image. Magnification: 428% to match the bottom image.
 
-2. **Bottom Crop**: Linear monochrome DNG produced by RWMono Quincunx + Derotate, treated in ACR at default settings. Magnification: 500% to match the top image.
+2. **Bottom Crop**: Linear monochrome DNG produced by RWMono Quincunx + Derotate, treated in ACR at default settings. Magnification: 600% to match the top image.
 
 ![Real world image comparison. High magnified crops of the same image with two different monochrome conversions: TOP: usual demosaicing, 100mpxl image, 428% magnification. BOTTOM: RWMono Quincunx + Derotate, 50mpxl image, 500% magnification](figures/real_sample_1.jpg){width=6.5in}
 
