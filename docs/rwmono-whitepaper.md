@@ -222,6 +222,21 @@ The *nature* of the errors, not their magnitude, is what separates the pipelines
 
 This is the practical summary of the whole section: demosaicing errs by **inventing**, no-demosaic errs by **blurring**, and on typical content both err little. Subjects that push chroma toward the sampling limit — where the invention becomes visible and permanent in B&W — include fine textiles and knits (houndstooth, tweed), distant colored signage and traffic markings, brick and roof-tile courses, printed halftones, LED/LCD screens, feathers, and backlit foliage edges. Photographers of such subjects are the audience for whom `bin` G and `quincunx` exist.
 
+## 7.2 Real-world comparisons between demosaiced and non-demosaiced
+
+The following comparison shows two very magnified crops of the same image treated into the following ways:
+
+1. **Top Crop** : 3FR 100mpxl raw image opened in Photoshop, treated in ACR at default settings, converted into monochrome with PS Channel Mixer (red: 0%, green: 100%, blue: 0%) to simulate a green-filtered monochrome image. Magnification: 428% to match the bottom image.
+
+2. **Bottom Crop**: Linear monochrome DNG produced by RWMono Quincunx + Derotate, treated in ACR at default settings. Magnification: 500% to match the top image.
+
+![Real world image comparison. High magnified crops of the same image with two different monochrome conversions: TOP: usual demosaicing, 100mpxl image, 428% magnification. BOTTOM: RWMono Quincunx + Derotate, 50mpxl image, 500% magnification](figures/real_sample_1.jpg){width=6.5in}
+
+This comparison clearly shows two advantages of the non-demosaiced process:
+
+- Lower noise and less wormy pattern in the sky area.
+- Absence of demosaicing artifacts around the white stick/antenna.
+
 # References
 
 - B. E. Bayer, "Color imaging array," U.S. Patent 3,971,065 (1976).
